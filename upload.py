@@ -1,6 +1,7 @@
 import json
 import os
 import requests
+import numpy
 from goto import with_goto
 from PIL import Image
 
@@ -12,7 +13,8 @@ def isImg(file):
         return False
 
 
-realpath = "D:\\BaiduNetdiskDownload\\test"  # 需要遍历的目录，末尾不要带/
+realpath = "D:\\BaiduNetdiskDownload\\datu\\test"  # 需要遍历的目录，末尾不要带/
+backupPath = "D:\\BaiduNetdiskDownload\\backup"  # 需要备份经处理图片的目录，末尾不要带/，不要选择其他分区的硬盘
 picPostList = []
 stack = []
 stack.append(realpath)
@@ -35,6 +37,40 @@ while len(stack) != 0:
             if w:
                 print("图片文件: ", fileAbspath)
                 picPostList.append(fileAbspath)
+                # print(picPostList)
+
+                # 不能直接操作原文件容易出错
+                fp = open(fileAbspath, 'rb')
+                im = Image.open(fp)  # 返回一个Image对象
+                # 后面还要用调用load函数，所以在close()前转换为numpy array类型
+                pic_array = numpy.array(im)
+                # 操作文件即时关闭
+                fp.close()
+
+                im = Image.fromarray(pic_array)
+                img_size = os.path.getsize(fileAbspath) / 1048576  # 计算图片Mb
+
+                # size的两个参数
+                width, height = im.size[0], im.size[1]
+                # 用于保存压缩过程中的temp路径,每次压缩会被不断覆盖
+                new_path = realpath + '/temp.jpg'
+                src_path = realpath + "/" + os.path.basename(fileAbspath)
+
+                (filePath, tempFilename) = os.path.split(src_path)  # filepath 文件路径 tempFilename 文件名含后缀
+                (shortName, extension) = os.path.splitext(tempFilename)  # shortName 文件名不含后缀 extension 后缀名
+
+                if img_size >= 50:
+                    print("图片太大: ", str(int(img_size)) + "Mb", "即将进行压缩处理...")
+                    width, height = round(width * 0.95), round(height * 0.95)
+                    im = im.resize((width, height), Image.ANTIALIAS)
+                    # 此时im为RGBA四通道，当原图格式为3通道时会报错，需要转换
+                    im = im.convert('RGB')
+                    im.save(new_path)
+                    img_size = os.path.getsize(new_path) / 1048576
+                    print("图片实时大小: " + str(int(img_size)) + "Mb", "实时分辨率: ", width, "x", height)
+
+                    os.renames(src_path, backupPath + "/" + tempFilename)
+                    os.rename(new_path, src_path)
             else:
                 print("其他文件: ", fileAbspath)
 
@@ -44,9 +80,9 @@ print("\n\n")
 @with_goto
 def postImg(picPostList):
     succNum = 0
-    APIKey = "xxx" # 此处填写你的key
-    url = "http://域名/api/1/upload/?key=" + APIKey + "&format=json" # 此处填写你的域名
-
+    APIKey = "4c5f01d2378410a3b5c4e1d4a6eddafc"
+    url = "http://img.vergil.com.cn/api/1/upload/?key=" + APIKey + "&format=json"
+    # print("=======", picPostList)
     label.begin
     failNum = 0
     while len(picPostList) - failNum != 0:
@@ -74,33 +110,15 @@ def postImg(picPostList):
                           json.loads(r.text)["status_txt"] + "\n" + json.loads(r.text)["error"]["message"])
                     failNum += 1
                     r.close()
+            elif responCode == 400:
+                print(localPic, "上传失败，原因：已存在此文件！")
+                succNum += 1
+                r.close()
             elif responCode == 413:
                 picPostList.insert(0, localPic)
-                print("上传失败，原因：文件过大！即将开始压缩操作…")
-
-                im = Image.open(localPic)  # 返回一个Image对象
-                imgSize = os.path.getsize(localPic) / 1048576  # 计算图片Mb
-                print("压缩前图片大小: " + str(imgSize) + "Mb")
-
-                # size的两个参数
-                width, height = im.size[0], im.size[1]
-                # 用于保存压缩过程中的temp路径,每次压缩会被不断覆盖
-                newPath = realpath + '/compress/temp.jpg'
-
-                while imgSize >= 50:
-                    width, height = round(width * 0.95), round(height * 0.95)
-                    print(width, height)
-                    im = im.resize((width, height), Image.ANTIALIAS)
-                    im.save(newPath)
-                    imgSize = os.path.getsize(newPath) / 1048576
-
+                print("上传失败，原因：文件过大！")
                 failNum += 1
                 r.close()
-
-                # 压缩完成备份原文件保存新文件待重新上传
-                srcPath = realpath + "/compress/" + os.path.basename(localPic)
-
-                os.rename(newPath, srcPath)
 
     print('成功：' + str(succNum), '失败' + str(failNum))
     print('如果您已经处理好上传失败的文件，请选择以下操作')
